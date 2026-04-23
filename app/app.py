@@ -196,8 +196,8 @@ def fetch_all_city_forecasts(api_key, units="metric"):
 @st.cache_data(ttl=60 * 15)
 def fetch_previous_day_load_mw_mean():
     if gridstatus is None:
-    st.error(f"gridstatus failed to import: {GRIDSTATUS_IMPORT_ERROR}")
-    st.stop()
+        st.error(f"gridstatus failed to import: {GRIDSTATUS_IMPORT_ERROR}")
+        st.stop()
 
     caiso = gridstatus.CAISO()
     yesterday = (pd.Timestamp.now(tz="America/Los_Angeles") - pd.Timedelta(days=1)).date()
