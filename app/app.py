@@ -1,12 +1,11 @@
 import os
-from datetime import datetime, timedelta
+from pathlib import Path
 
 import joblib
-import pandas as pd
 import numpy as np
+import pandas as pd
 import requests
 import streamlit as st
-from pathlib import Path
 
 try:
     import gridstatus
@@ -44,7 +43,7 @@ def get_expected_feature_columns(model):
 
 
 @st.cache_data(ttl=60 * 30)
-def get_forecast_json(lat, lon, api_key, units="metric"):
+def get_forecast_json(lat, lon, api_key, units="imperial"):
     params = {
         "lat": lat,
         "lon": lon,
@@ -120,7 +119,10 @@ def build_daily_forecast_features(model_like_df):
     df = df.sort_values("datetime").reset_index(drop=True)
     df = filter_full_forecast_days(df)
 
-    weather_cols = [c for c in df.columns if c.endswith("_weather_main") or c.endswith("_weather_desc") or c.endswith("_weather_icon")]
+    weather_cols = [
+        c for c in df.columns
+        if c.endswith("_weather_main") or c.endswith("_weather_desc") or c.endswith("_weather_icon")
+    ]
     numeric_df = df.drop(columns=weather_cols, errors="ignore").copy()
 
     for col in ["la_prcp", "sf_prcp", "sd_prcp", "sj_prcp", "fresno_prcp"]:
@@ -156,14 +158,16 @@ def build_daily_forecast_features(model_like_df):
     daily_df.columns = [f"{col[0]}_{col[1]}" for col in daily_df.columns]
     daily_df = daily_df.reset_index()
 
-    # representative icon/description using LA midday forecast when available
     icon_rows = df[df["datetime"].dt.hour == 12].copy()
     if icon_rows.empty:
         icon_rows = df.groupby(df["datetime"].dt.normalize(), as_index=False).first()
     else:
         icon_rows = icon_rows.groupby(icon_rows["datetime"].dt.normalize(), as_index=False).first()
 
-    icon_map = icon_rows[["datetime", f"{DISPLAY_CITY_FOR_ICON}_weather_main", f"{DISPLAY_CITY_FOR_ICON}_weather_desc", f"{DISPLAY_CITY_FOR_ICON}_weather_icon"]].copy()
+    icon_map = icon_rows[
+        ["datetime", f"{DISPLAY_CITY_FOR_ICON}_weather_main", f"{DISPLAY_CITY_FOR_ICON}_weather_desc", f"{DISPLAY_CITY_FOR_ICON}_weather_icon"]
+    ].copy()
+
     icon_map = icon_map.rename(columns={
         "datetime": "date",
         f"{DISPLAY_CITY_FOR_ICON}_weather_main": "weather_main",
@@ -187,7 +191,7 @@ def build_daily_forecast_features(model_like_df):
 
 
 @st.cache_data(ttl=60 * 30)
-def fetch_all_city_forecasts(api_key, units="metric"):
+def fetch_all_city_forecasts(api_key, units="imperial"):
     weather_dfs = {}
     for city_name, coords in CITY_COORDS.items():
         forecast_json = get_forecast_json(coords["lat"], coords["lon"], api_key, units=units)
@@ -226,20 +230,22 @@ def add_aggregated_weather_features(df, base_temp=65, hot_temp=75, very_hot_temp
     df["temp_mean_all"] = df[temp_mean_cols].mean(axis=1)
     df["temp_max_all"] = df[temp_max_cols].mean(axis=1)
     df["temp_min_all"] = df[temp_min_cols].mean(axis=1)
+
     df["rhum_mean_all"] = df[rhum_mean_cols].mean(axis=1)
     df["prcp_sum_all"] = df[prcp_sum_cols].sum(axis=1)
     df["wspd_mean_all"] = df[wspd_mean_cols].mean(axis=1)
 
-    # convert C to F because training data engineered these with base_temp=65, hot_temp=75, very_hot_temp=85
-    temp_mean_all_f = df["temp_mean_all"] * 9 / 5 + 32
-
     df["temp_range_all"] = df["temp_max_all"] - df["temp_min_all"]
-    df["cooling_degree"] = np.maximum(0, temp_mean_all_f - base_temp)
-    df["heating_degree"] = np.maximum(0, base_temp - temp_mean_all_f)
+
+    # Match preprocessing.py exactly: no unit conversion here.
+    df["cooling_degree"] = np.maximum(0, df["temp_mean_all"] - base_temp)
+    df["heating_degree"] = np.maximum(0, base_temp - df["temp_mean_all"])
+
     df["cooling_degree_sq"] = df["cooling_degree"] ** 2
     df["heating_degree_sq"] = df["heating_degree"] ** 2
-    df["is_hot"] = (temp_mean_all_f >= hot_temp).astype(int)
-    df["is_very_hot"] = (temp_mean_all_f >= very_hot_temp).astype(int)
+
+    df["is_hot"] = (df["temp_mean_all"] >= hot_temp).astype(int)
+    df["is_very_hot"] = (df["temp_mean_all"] >= very_hot_temp).astype(int)
 
     return df
 
@@ -310,7 +316,9 @@ def load_arrow(current_value, previous_value):
 
 def main():
     st.title("California Electricity Demand Forecast")
-    st.caption("4-day forecast using OpenWeatherMap weather forecasts + yesterday's CAISO load from GridStatus + your trained linear regression model.")
+    st.caption(
+        "4-day forecast using OpenWeatherMap weather forecasts + yesterday's CAISO load from GridStatus + your trained linear regression model."
+    )
 
     if not OPENWEATHER_API_KEY:
         st.error("Missing OPENWEATHER_API_KEY. Add it to Streamlit secrets before running the app.")
@@ -324,7 +332,7 @@ def main():
     expected_features = get_expected_feature_columns(model)
 
     with st.spinner("Pulling forecast weather and CAISO load..."):
-        city_weather_dfs = fetch_all_city_forecasts(OPENWEATHER_API_KEY, units="metric")
+        city_weather_dfs = fetch_all_city_forecasts(OPENWEATHER_API_KEY, units="imperial")
         merged_forecast_df = merge_city_forecasts(city_weather_dfs)
         daily_weather_df = build_daily_forecast_features(merged_forecast_df)
         initial_lag1_load = fetch_previous_day_load_mw_mean()
@@ -347,7 +355,9 @@ def main():
         X_pred = inference_df[expected_features].copy()
         preds = np.array(predictions)
 
-    results = inference_df[["datetime", "weather_main", "weather_desc", "weather_icon", "temp_mean_all", "prcp_sum_all"]].copy()
+    results = inference_df[
+        ["datetime", "weather_main", "weather_desc", "weather_icon", "temp_mean_all", "prcp_sum_all"]
+    ].copy()
     results["predicted_load_mw_mean"] = preds
     results["date"] = pd.to_datetime(results["datetime"]).dt.strftime("%a %b %d")
 
@@ -367,7 +377,7 @@ def main():
                 delta=f"{row['predicted_load_mw_mean'] - previous_pred:,.0f} MW",
             )
             st.caption(f"{row['weather_desc'].title() if pd.notna(row['weather_desc']) else 'Forecast unavailable'}")
-            st.caption(f"Avg temp: {row['temp_mean_all']:.1f}°C")
+            st.caption(f"Avg temp: {row['temp_mean_all']:.1f}°F")
             st.caption(f"Precip: {row['prcp_sum_all']:.1f} mm")
             previous_pred = row["predicted_load_mw_mean"]
 
@@ -379,8 +389,9 @@ def main():
     display_df = results[["date", "weather_desc", "temp_mean_all", "prcp_sum_all", "predicted_load_mw_mean"]].copy()
     display_df = display_df.rename(columns={
         "weather_desc": "weather",
-        "temp_mean_all": "avg_temp_c",
+        "temp_mean_all": "avg_temp_f",
         "prcp_sum_all": "precip_mm",
+        "predicted_load_mw_mean": "predicted_load_mw",
     })
     st.dataframe(display_df, use_container_width=True)
 
