@@ -377,7 +377,7 @@ def main():
             st.markdown(f"### {row['date']}")
             st.markdown(f"{wx}  {arrow}")
             st.metric(
-                label="Predicted mean load",
+                label="Predicted CAISO demand (MW)",
                 value=f"{row['predicted_load_mw_mean']:,.0f} MW",
                 delta=f"{row['predicted_load_mw_mean'] - previous_pred:,.0f} MW",
             )
@@ -401,13 +401,9 @@ def main():
     st.dataframe(display_df, use_container_width=True)
 
     with st.expander("Debug / model inputs"):
-        st.write("Expected model feature columns:")
+        st.write(f"Initial lag1_load: {initial_lag1_load:,.0f} MW")
+        st.write("Model features used:")
         st.write(expected_features)
-        st.write("Daily weather features before engineering:")
-        st.dataframe(daily_weather_df, use_container_width=True)
-        st.write("Final inference frame sent to model:")
-        st.dataframe(X_pred, use_container_width=True)
-        st.write(f"Yesterday mean CAISO load used as initial lag1_load: {initial_lag1_load:,.2f} MW")
 
     st.info(
         "Important note: because the model uses lag1_load, the app uses a recursive forecast: day 1 uses yesterday's actual CAISO mean load, then each later day uses the prior day's prediction as its lag input."
