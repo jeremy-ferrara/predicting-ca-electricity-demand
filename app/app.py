@@ -202,8 +202,11 @@ def fetch_all_city_forecasts(api_key, units="imperial"):
 @st.cache_data(ttl=60 * 15)
 def fetch_previous_day_load_mw_mean():
     caiso = gridstatus.CAISO()
-    yesterday = (pd.Timestamp.now(tz="America/Los_Angeles") - pd.Timedelta(days=1)).date()
-    load_df = caiso.get_load(yesterday)
+
+    start = (pd.Timestamp.now(tz="America/Los_Angeles") - pd.Timedelta(days=1)).normalize()
+    end = start + pd.Timedelta(days=1)
+
+    load_df = caiso.get_load(start=start, end=end)
 
     load_col = None
     for candidate in ["Load", "load"]:
@@ -212,8 +215,9 @@ def fetch_previous_day_load_mw_mean():
             break
 
     if load_col is None:
-        raise ValueError(f"Could not find load column in GridStatus response: {load_df.columns.tolist()}")
+        raise ValueError("Could not find load column")
 
+    # ensure hourly-like data → then average
     return float(load_df[load_col].mean())
 
 
@@ -336,6 +340,7 @@ def main():
         merged_forecast_df = merge_city_forecasts(city_weather_dfs)
         daily_weather_df = build_daily_forecast_features(merged_forecast_df)
         initial_lag1_load = fetch_previous_day_load_mw_mean()
+        st.write("Initial lag1_load:", initial_lag1_load)
 
         feature_rows = []
         predictions = []
