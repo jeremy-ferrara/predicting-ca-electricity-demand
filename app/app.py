@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import requests
 import streamlit as st
+from pathlib import Path
 
 try:
     import gridstatus
@@ -16,7 +17,8 @@ except Exception as e:
 
 st.set_page_config(page_title="CA Electricity Demand Forecast", page_icon="⚡", layout="wide")
 
-MODEL_PATH = "ca_electricity_demand_lr_v1.joblib"
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR.parent / "data" / "artifacts" / "ca_electricity_demand_lr_v1.joblib"
 OPENWEATHER_API_KEY = st.secrets.get("OPENWEATHER_API_KEY", os.getenv("OPENWEATHER_API_KEY", ""))
 
 CITY_COORDS = {
