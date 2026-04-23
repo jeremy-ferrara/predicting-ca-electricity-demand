@@ -43,7 +43,7 @@ def get_expected_feature_columns(model):
 
 
 @st.cache_data(ttl=60 * 30)
-def get_forecast_json(lat, lon, api_key, units="imperial"):
+def get_forecast_json(lat, lon, api_key, units="metric"):
     params = {
         "lat": lat,
         "lon": lon,
@@ -191,7 +191,7 @@ def build_daily_forecast_features(model_like_df):
 
 
 @st.cache_data(ttl=60 * 30)
-def fetch_all_city_forecasts(api_key, units="imperial"):
+def fetch_all_city_forecasts(api_key, units="metric"):
     weather_dfs = {}
     for city_name, coords in CITY_COORDS.items():
         forecast_json = get_forecast_json(coords["lat"], coords["lon"], api_key, units=units)
@@ -336,7 +336,7 @@ def main():
     expected_features = get_expected_feature_columns(model)
 
     with st.spinner("Pulling forecast weather and CAISO load..."):
-        city_weather_dfs = fetch_all_city_forecasts(OPENWEATHER_API_KEY, units="imperial")
+        city_weather_dfs = fetch_all_city_forecasts(OPENWEATHER_API_KEY, units="metric")
         merged_forecast_df = merge_city_forecasts(city_weather_dfs)
         daily_weather_df = build_daily_forecast_features(merged_forecast_df)
         initial_lag1_load = fetch_previous_day_load_mw_mean()
@@ -382,7 +382,7 @@ def main():
                 delta=f"{row['predicted_load_mw_mean'] - previous_pred:,.0f} MW",
             )
             st.caption(f"{row['weather_desc'].title() if pd.notna(row['weather_desc']) else 'Forecast unavailable'}")
-            st.caption(f"Avg temp: {row['temp_mean_all']:.1f}°F")
+            st.caption(f"Avg temp: {row['temp_mean_all']:.1f}°C")
             st.caption(f"Precip: {row['prcp_sum_all']:.1f} mm")
             previous_pred = row["predicted_load_mw_mean"]
 
@@ -394,7 +394,7 @@ def main():
     display_df = results[["date", "weather_desc", "temp_mean_all", "prcp_sum_all", "predicted_load_mw_mean"]].copy()
     display_df = display_df.rename(columns={
         "weather_desc": "weather",
-        "temp_mean_all": "avg_temp_f",
+        "temp_mean_all": "avg_temp_c",
         "prcp_sum_all": "precip_mm",
         "predicted_load_mw_mean": "predicted_load_mw",
     })
