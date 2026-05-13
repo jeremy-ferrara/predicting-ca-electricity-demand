@@ -443,6 +443,8 @@ def main():
 
     st.subheader("Forecast chart")
 
+    st.caption("4-day forecast of predicted average California electricity demand.")
+
     chart_df = results[["datetime", "predicted_load_mw_mean"]].copy()
 
     chart_df["Date"] = pd.to_datetime(chart_df["datetime"]).dt.strftime("%a %b %d")
@@ -469,10 +471,6 @@ def main():
     )
 
     st.altair_chart(line_chart, use_container_width=True)
-
-    st.caption(
-        "4-day forecast of predicted average California electricity demand."
-    )
 
     st.subheader("Forecast table")
 
