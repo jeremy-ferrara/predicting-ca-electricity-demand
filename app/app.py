@@ -512,20 +512,20 @@ def main():
         )
 
     with st.expander("Model details"):
-    st.markdown(
-        """
-        - Model type: Linear Regression  
-        - Forecast horizon: 4 days  
-        - Weather data source: OpenWeatherMap forecasts from Los Angeles, San Francisco, San Diego, San Jose, and Fresno  
-        - Electricity demand data source: CAISO grid demand data accessed through GridStatus  
-        - Key inputs include statewide weather conditions, recent electricity demand, seasonal patterns, and day-of-week trends  
-        """
-    )
+        st.markdown(
+            """
+            - Model type: Linear Regression  
+            - Forecast horizon: 4 days  
+            - Weather data source: OpenWeatherMap forecasts from Los Angeles, San Francisco, San Diego, San Jose, and Fresno  
+            - Electricity demand data source: CAISO grid demand data accessed through GridStatus  
+            - Key inputs include statewide weather conditions, recent electricity demand, seasonal patterns, and day-of-week trends  
+            """
+        )
 
-    st.write(f"Previous day's actual average CAISO load: {previous_day_actual_load:,.0f} MW")
+        st.write(f"Previous day's actual average CAISO load: {previous_day_actual_load:,.0f} MW")
 
-    st.write("Model features used:")
-    st.write(expected_features)
+        st.write("Model features used:")
+        st.write(expected_features)
 
 
 if __name__ == "__main__":
