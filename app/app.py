@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import altair as alt
 
 try:
     import gridstatus
@@ -348,11 +349,9 @@ def main():
 
     st.markdown(
         """
-        This app estimates California's average electricity demand for the next few days.
+        This app estimates California's average electricity demand for the next four days.
 
-        In plain English: it looks at the weather forecast across several major California cities,
-        combines that with recent statewide electricity demand, and uses a trained machine learning model
-        to predict how much electricity California is likely to use each day.
+        The forecast is generated using a linear regression machine learning model trained on historical California electricity demand, weather patterns across five major California cities, and calendar-related features.
         """
     )
 
@@ -430,8 +429,6 @@ def main():
                 delta=f"{change_amount:,.0f} MW"
             )
 
-            st.caption(f"This is {change_text}.")
-
             st.markdown("**Weather by city**")
             for city, label in CITY_LABELS.items():
                 desc = row.get(f"{city}_daily_weather_desc", "")
@@ -447,20 +444,34 @@ def main():
     st.subheader("Forecast chart")
 
     chart_df = results[["datetime", "predicted_load_mw_mean"]].copy()
-    chart_df["Date"] = pd.to_datetime(chart_df["datetime"]).dt.strftime("%a %b %d")
-    chart_df = chart_df[["Date", "predicted_load_mw_mean"]].rename(columns={
-        "predicted_load_mw_mean": "Predicted average demand (MW)"
-    })
 
-    st.line_chart(
-        chart_df,
-        x="Date",
-        y="Predicted average demand (MW)",
-        use_container_width=True
+    chart_df["Date"] = pd.to_datetime(chart_df["datetime"]).dt.strftime("%a %b %d")
+
+    line_chart = (
+        alt.Chart(chart_df)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X(
+                "Date:N",
+                sort=None,
+                axis=alt.Axis(labelAngle=-30, labelFontSize=12)
+            ),
+            y=alt.Y(
+                "predicted_load_mw_mean:Q",
+                title="Predicted Average Demand (MW)"
+            ),
+            tooltip=[
+                alt.Tooltip("Date:N"),
+                alt.Tooltip("predicted_load_mw_mean:Q", format=",.0f")
+            ]
+        )
+        .properties(height=400)
     )
 
+    st.altair_chart(line_chart, use_container_width=True)
+
     st.caption(
-        "This chart shows one prediction per day, connected by a simple line so the daily trend is easy to see."
+        "4-day forecast of predicted average California electricity demand."
     )
 
     st.subheader("Forecast table")
@@ -500,16 +511,21 @@ def main():
             """
         )
 
-    with st.expander("Technical details"):
-        st.markdown(
-            """
-            These details are included for reviewers or technical readers.
-            The prediction pipeline, feature engineering, model inputs, and trained model are unchanged.
-            """
-        )
-        st.write(f"Previous day's actual average CAISO load: {previous_day_actual_load:,.0f} MW")
-        st.write("Model features used:")
-        st.write(expected_features)
+    with st.expander("Model details"):
+    st.markdown(
+        """
+        - Model type: Linear Regression  
+        - Forecast horizon: 4 days  
+        - Weather data source: OpenWeatherMap forecasts from Los Angeles, San Francisco, San Diego, San Jose, and Fresno  
+        - Electricity demand data source: CAISO grid demand data accessed through GridStatus  
+        - Key inputs include statewide weather conditions, recent electricity demand, seasonal patterns, and day-of-week trends  
+        """
+    )
+
+    st.write(f"Previous day's actual average CAISO load: {previous_day_actual_load:,.0f} MW")
+
+    st.write("Model features used:")
+    st.write(expected_features)
 
 
 if __name__ == "__main__":
