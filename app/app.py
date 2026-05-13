@@ -14,7 +14,12 @@ except Exception as e:
     gridstatus = None
     GRIDSTATUS_IMPORT_ERROR = e
 
-st.set_page_config(page_title="CA Electricity Demand Forecast", page_icon="⚡", layout="wide")
+
+st.set_page_config(
+    page_title="CA Electricity Demand Forecast",
+    page_icon="⚡",
+    layout="wide"
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR.parent / "data" / "artifacts" / "ca_electricity_demand_lr_v1.joblib"
@@ -28,8 +33,15 @@ CITY_COORDS = {
     "fresno": {"lat": 36.7378, "lon": -119.7871},
 }
 
+CITY_LABELS = {
+    "la": "Los Angeles",
+    "sf": "San Francisco",
+    "sd": "San Diego",
+    "sj": "San Jose",
+    "fresno": "Fresno",
+}
+
 BASE_URL = "https://api.openweathermap.org/data/2.5/forecast"
-DISPLAY_CITY_FOR_ICON = "la"
 
 
 @st.cache_resource
@@ -113,6 +125,31 @@ def filter_full_forecast_days(df):
     return df.drop(columns="date")
 
 
+def build_daily_weather_summary(df, city_prefix):
+    desc_col = f"{city_prefix}_weather_desc"
+    main_col = f"{city_prefix}_weather_main"
+    icon_col = f"{city_prefix}_weather_icon"
+
+    icon_rows = df[df["datetime"].dt.hour == 12].copy()
+
+    if icon_rows.empty:
+        icon_rows = df.groupby(df["datetime"].dt.normalize(), as_index=False).first()
+    else:
+        icon_rows = icon_rows.groupby(icon_rows["datetime"].dt.normalize(), as_index=False).first()
+
+    summary = icon_rows[["datetime", main_col, desc_col, icon_col]].copy()
+    summary["date"] = pd.to_datetime(summary["datetime"]).dt.normalize()
+    summary = summary.drop(columns=["datetime"])
+
+    summary = summary.rename(columns={
+        main_col: f"{city_prefix}_daily_weather_main",
+        desc_col: f"{city_prefix}_daily_weather_desc",
+        icon_col: f"{city_prefix}_daily_weather_icon",
+    })
+
+    return summary
+
+
 def build_daily_forecast_features(model_like_df):
     df = model_like_df.copy()
     df["datetime"] = pd.to_datetime(df["datetime"])
@@ -157,26 +194,12 @@ def build_daily_forecast_features(model_like_df):
 
     daily_df.columns = [f"{col[0]}_{col[1]}" for col in daily_df.columns]
     daily_df = daily_df.reset_index()
+    daily_df["date"] = pd.to_datetime(daily_df["datetime"]).dt.normalize()
 
-    icon_rows = df[df["datetime"].dt.hour == 12].copy()
-    if icon_rows.empty:
-        icon_rows = df.groupby(df["datetime"].dt.normalize(), as_index=False).first()
-    else:
-        icon_rows = icon_rows.groupby(icon_rows["datetime"].dt.normalize(), as_index=False).first()
+    for city_prefix in CITY_COORDS.keys():
+        city_summary = build_daily_weather_summary(df, city_prefix)
+        daily_df = daily_df.merge(city_summary, on="date", how="left")
 
-    icon_map = icon_rows[
-        ["datetime", f"{DISPLAY_CITY_FOR_ICON}_weather_main", f"{DISPLAY_CITY_FOR_ICON}_weather_desc", f"{DISPLAY_CITY_FOR_ICON}_weather_icon"]
-    ].copy()
-
-    icon_map = icon_map.rename(columns={
-        "datetime": "date",
-        f"{DISPLAY_CITY_FOR_ICON}_weather_main": "weather_main",
-        f"{DISPLAY_CITY_FOR_ICON}_weather_desc": "weather_desc",
-        f"{DISPLAY_CITY_FOR_ICON}_weather_icon": "weather_icon",
-    })
-    icon_map["date"] = pd.to_datetime(icon_map["date"]).dt.normalize()
-
-    daily_df = daily_df.merge(icon_map, left_on="datetime", right_on="date", how="left")
     daily_df = daily_df.drop(columns=["date"], errors="ignore")
 
     daily_df["year"] = daily_df["datetime"].dt.year
@@ -217,7 +240,6 @@ def fetch_previous_day_load_mw_mean():
     if load_col is None:
         raise ValueError("Could not find load column")
 
-    # ensure hourly-like data → then average
     return float(load_df[load_col].mean())
 
 
@@ -241,7 +263,6 @@ def add_aggregated_weather_features(df, base_temp=65, hot_temp=75, very_hot_temp
 
     df["temp_range_all"] = df["temp_max_all"] - df["temp_min_all"]
 
-    # Match preprocessing.py exactly: no unit conversion here.
     df["cooling_degree"] = np.maximum(0, df["temp_mean_all"] - base_temp)
     df["heating_degree"] = np.maximum(0, base_temp - df["temp_mean_all"])
 
@@ -312,20 +333,31 @@ def weather_emoji(desc):
 
 def load_arrow(current_value, previous_value):
     if current_value > previous_value + 1:
-        return "📈"
+        return "higher than previous day"
     if current_value < previous_value - 1:
-        return "📉"
-    return "➡️"
+        return "lower than previous day"
+    return "about the same as previous day"
+
+
+def c_to_f(temp_c):
+    return temp_c * 9 / 5 + 32
 
 
 def main():
-    st.title("California Electricity Demand Forecast")
-    st.caption(
-        "4-day forecast using OpenWeatherMap weather forecasts + yesterday's CAISO load from GridStatus + your trained linear regression model."
+    st.title("⚡ California Electricity Demand Forecast")
+
+    st.markdown(
+        """
+        This app estimates California's average electricity demand for the next few days.
+
+        In plain English: it looks at the weather forecast across several major California cities,
+        combines that with recent statewide electricity demand, and uses a trained machine learning model
+        to predict how much electricity California is likely to use each day.
+        """
     )
 
     if not OPENWEATHER_API_KEY:
-        st.error("Missing OPENWEATHER_API_KEY. Add it to Streamlit secrets before running the app.")
+        st.error("Missing OpenWeather API key. Add OPENWEATHER_API_KEY to Streamlit secrets before running the app.")
         st.stop()
 
     if gridstatus is None:
@@ -335,16 +367,16 @@ def main():
     model = load_model()
     expected_features = get_expected_feature_columns(model)
 
-    with st.spinner("Pulling forecast weather and CAISO load..."):
+    with st.spinner("Loading weather forecasts and recent California electricity demand..."):
         city_weather_dfs = fetch_all_city_forecasts(OPENWEATHER_API_KEY, units="metric")
         merged_forecast_df = merge_city_forecasts(city_weather_dfs)
         daily_weather_df = build_daily_forecast_features(merged_forecast_df)
-        initial_lag1_load = fetch_previous_day_load_mw_mean()
-        st.write("Initial lag1_load:", initial_lag1_load)
+
+        previous_day_actual_load = fetch_previous_day_load_mw_mean()
 
         feature_rows = []
         predictions = []
-        rolling_lag = initial_lag1_load
+        rolling_lag = previous_day_actual_load
 
         for _, raw_row in daily_weather_df.iterrows():
             raw_row_df = pd.DataFrame([raw_row])
@@ -357,57 +389,127 @@ def main():
             rolling_lag = pred
 
         inference_df = pd.concat(feature_rows, ignore_index=True)
-        X_pred = inference_df[expected_features].copy()
         preds = np.array(predictions)
 
-    results = inference_df[
-        ["datetime", "weather_main", "weather_desc", "weather_icon", "temp_mean_all", "prcp_sum_all"]
-    ].copy()
-    results["predicted_load_mw_mean"] = preds
-    results["date"] = pd.to_datetime(results["datetime"]).dt.strftime("%a %b %d")
+    city_weather_cols = []
+    for city in CITY_COORDS.keys():
+        city_weather_cols.extend([
+            f"{city}_daily_weather_desc",
+            f"{city}_daily_weather_icon",
+        ])
 
-    st.subheader("Forecast cards")
+    results = inference_df[
+        ["datetime", "temp_mean_all", "prcp_sum_all"] + city_weather_cols
+    ].copy()
+
+    results["predicted_load_mw_mean"] = preds
+    results["date"] = pd.to_datetime(results["datetime"]).dt.strftime("%a, %b %d")
+    results["avg_temp_f"] = results["temp_mean_all"].apply(c_to_f)
+
+    st.subheader("Daily forecast")
+
+    st.caption(
+        "Each card shows the model's predicted average electricity demand for that day. "
+        "The weather shown below each prediction uses forecasts from Los Angeles, San Francisco, "
+        "San Diego, San Jose, and Fresno."
+    )
+
     cols = st.columns(len(results))
 
-    previous_pred = initial_lag1_load
+    previous_pred = previous_day_actual_load
+
     for i, (_, row) in enumerate(results.iterrows()):
         with cols[i]:
-            arrow = load_arrow(row["predicted_load_mw_mean"], previous_pred)
-            wx = weather_emoji(row["weather_desc"])
+            change_text = load_arrow(row["predicted_load_mw_mean"], previous_pred)
+            change_amount = row["predicted_load_mw_mean"] - previous_pred
+
             st.markdown(f"### {row['date']}")
-            st.markdown(f"{wx}  {arrow}")
             st.metric(
-                label="Predicted CAISO demand (MW)",
+                label="Predicted average demand",
                 value=f"{row['predicted_load_mw_mean']:,.0f} MW",
-                delta=f"{row['predicted_load_mw_mean'] - previous_pred:,.0f} MW",
+                delta=f"{change_amount:,.0f} MW"
             )
-            st.caption(f"{row['weather_desc'].title() if pd.notna(row['weather_desc']) else 'Forecast unavailable'}")
-            st.caption(f"Avg temp: {row['temp_mean_all']:.1f}°C")
-            st.caption(f"Precip: {row['prcp_sum_all']:.1f} mm")
+
+            st.caption(f"This is {change_text}.")
+
+            st.markdown("**Weather by city**")
+            for city, label in CITY_LABELS.items():
+                desc = row.get(f"{city}_daily_weather_desc", "")
+                emoji = weather_emoji(desc)
+                readable_desc = desc.title() if pd.notna(desc) and desc else "Forecast unavailable"
+                st.caption(f"{emoji} {label}: {readable_desc}")
+
+            st.caption(f"Statewide average temperature: {row['avg_temp_f']:.1f}°F")
+            st.caption(f"Total precipitation estimate: {row['prcp_sum_all']:.1f} mm")
+
             previous_pred = row["predicted_load_mw_mean"]
 
     st.subheader("Forecast chart")
-    chart_df = results[["datetime", "predicted_load_mw_mean"]].copy().set_index("datetime")
-    st.line_chart(chart_df)
+
+    chart_df = results[["datetime", "predicted_load_mw_mean"]].copy()
+    chart_df["Date"] = pd.to_datetime(chart_df["datetime"]).dt.strftime("%a %b %d")
+    chart_df = chart_df[["Date", "predicted_load_mw_mean"]].rename(columns={
+        "predicted_load_mw_mean": "Predicted average demand (MW)"
+    })
+
+    st.line_chart(
+        chart_df,
+        x="Date",
+        y="Predicted average demand (MW)",
+        use_container_width=True
+    )
+
+    st.caption(
+        "This chart shows one prediction per day, connected by a simple line so the daily trend is easy to see."
+    )
 
     st.subheader("Forecast table")
-    display_df = results[["date", "weather_desc", "temp_mean_all", "prcp_sum_all", "predicted_load_mw_mean"]].copy()
-    display_df = display_df.rename(columns={
-        "weather_desc": "weather",
-        "temp_mean_all": "avg_temp_c",
-        "prcp_sum_all": "precip_mm",
-        "predicted_load_mw_mean": "predicted_load_mw",
-    })
-    st.dataframe(display_df, use_container_width=True)
 
-    with st.expander("Debug / model inputs"):
-        st.write(f"Initial lag1_load: {initial_lag1_load:,.0f} MW")
+    display_df = results[[
+        "date",
+        "avg_temp_f",
+        "prcp_sum_all",
+        "predicted_load_mw_mean"
+    ]].copy()
+
+    display_df = display_df.rename(columns={
+        "date": "Date",
+        "avg_temp_f": "Avg statewide temp (°F)",
+        "prcp_sum_all": "Precipitation estimate (mm)",
+        "predicted_load_mw_mean": "Predicted average demand (MW)",
+    })
+
+    display_df["Avg statewide temp (°F)"] = display_df["Avg statewide temp (°F)"].round(1)
+    display_df["Precipitation estimate (mm)"] = display_df["Precipitation estimate (mm)"].round(1)
+    display_df["Predicted average demand (MW)"] = display_df["Predicted average demand (MW)"].round(0).astype(int)
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    with st.expander("How this forecast works"):
+        st.markdown(
+            """
+            This app uses three main ingredients:
+
+            1. **Weather forecasts** from several major California cities.
+            2. **Recent statewide electricity demand** from CAISO, California's electric grid operator.
+            3. **A trained machine learning model** that learned patterns between weather, calendar timing, and electricity use.
+
+            For the first forecasted day, the model uses yesterday's real electricity demand.
+            For the following days, it uses the previous day's prediction to continue the forecast forward.
+            This keeps the app fully automated while still allowing it to produce a multi-day outlook.
+            """
+        )
+
+    with st.expander("Technical details"):
+        st.markdown(
+            """
+            These details are included for reviewers or technical readers.
+            The prediction pipeline, feature engineering, model inputs, and trained model are unchanged.
+            """
+        )
+        st.write(f"Previous day's actual average CAISO load: {previous_day_actual_load:,.0f} MW")
         st.write("Model features used:")
         st.write(expected_features)
-
-    st.info(
-        "Important note: because the model uses lag1_load, the app uses a recursive forecast: day 1 uses yesterday's actual CAISO mean load, then each later day uses the prior day's prediction as its lag input."
-    )
 
 
 if __name__ == "__main__":
